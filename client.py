@@ -76,6 +76,7 @@ def evaluate(model, env, client_id, round_idx, out_csv, max_steps=200, fixed_act
             "a3": info.get("a3", a3),
         }
         rows.append(row)
+
         if done or trunc:
             break
 
@@ -85,6 +86,7 @@ def evaluate(model, env, client_id, round_idx, out_csv, max_steps=200, fixed_act
 
 def run_baseline(args):
     os.makedirs(args.out_dir, exist_ok=True)
+
     prefix = build_file_prefix(args.algo_tag, args.run_id, args.client_id)
     client_log = os.path.join(args.out_dir, f"{prefix}_round_log.csv")
     eval_log = os.path.join(args.out_dir, f"{prefix}_eval.csv")
@@ -94,6 +96,7 @@ def run_baseline(args):
 
     for round_idx in range(args.rounds):
         t0 = now_ms()
+
         evaluate(
             model=None,
             env=env,
@@ -103,13 +106,20 @@ def run_baseline(args):
             max_steps=args.eval_steps,
             fixed_action=fixed_action,
         )
+
         t1 = now_ms()
 
         save_csv_row(
             client_log,
             [
-                "time_ms", "client_id", "round_idx", "base_version", "acked_global_version",
-                "pull_ms", "local_train_ms", "push_ms"
+                "time_ms",
+                "client_id",
+                "round_idx",
+                "base_version",
+                "acked_global_version",
+                "pull_ms",
+                "local_train_ms",
+                "push_ms",
             ],
             {
                 "time_ms": now_ms(),
@@ -120,13 +130,15 @@ def run_baseline(args):
                 "pull_ms": 0.0,
                 "local_train_ms": t1 - t0,
                 "push_ms": 0.0,
-            }
+            },
         )
+
         time.sleep(args.sleep_between_rounds)
 
 
 def run_local_ppo(args):
     os.makedirs(args.out_dir, exist_ok=True)
+
     prefix = build_file_prefix(args.algo_tag, args.run_id, args.client_id)
     client_log = os.path.join(args.out_dir, f"{prefix}_round_log.csv")
     eval_log = os.path.join(args.out_dir, f"{prefix}_eval.csv")
@@ -142,8 +154,14 @@ def run_local_ppo(args):
         save_csv_row(
             client_log,
             [
-                "time_ms", "client_id", "round_idx", "base_version", "acked_global_version",
-                "pull_ms", "local_train_ms", "push_ms"
+                "time_ms",
+                "client_id",
+                "round_idx",
+                "base_version",
+                "acked_global_version",
+                "pull_ms",
+                "local_train_ms",
+                "push_ms",
             ],
             {
                 "time_ms": now_ms(),
@@ -154,15 +172,24 @@ def run_local_ppo(args):
                 "pull_ms": 0.0,
                 "local_train_ms": train_end - train_start,
                 "push_ms": 0.0,
-            }
+            },
         )
 
-        evaluate(model, env, args.client_id, round_idx, eval_log, max_steps=args.eval_steps)
+        evaluate(
+            model=model,
+            env=env,
+            client_id=args.client_id,
+            round_idx=round_idx,
+            out_csv=eval_log,
+            max_steps=args.eval_steps,
+        )
+
         time.sleep(args.sleep_between_rounds)
 
 
 def run_federated(args):
     os.makedirs(args.out_dir, exist_ok=True)
+
     prefix = build_file_prefix(args.algo_tag, args.run_id, args.client_id)
     client_log = os.path.join(args.out_dir, f"{prefix}_round_log.csv")
     eval_log = os.path.join(args.out_dir, f"{prefix}_eval.csv")
@@ -179,6 +206,7 @@ def run_federated(args):
     for round_idx in range(args.rounds):
         t0 = now_ms()
 
+        # pull global state
         send_msg(sock, {"type": "pull"})
         resp = recv_msg(sock)
         if resp is None:
@@ -188,19 +216,24 @@ def run_federated(args):
 
         set_state_dict(model, global_state)
 
+        # local train
         train_start = now_ms()
         model.learn(total_timesteps=args.local_timesteps, reset_num_timesteps=False)
         train_end = now_ms()
 
         local_state = get_state_dict(model)
 
+        # push local update
         push_start = now_ms()
-        send_msg(sock, {
-            "type": "push_update",
-            "client_id": args.client_id,
-            "base_version": global_version,
-            "state": local_state,
-        })
+        send_msg(
+            sock,
+            {
+                "type": "push_update",
+                "client_id": args.client_id,
+                "base_version": global_version,
+                "state": local_state,
+            },
+        )
         ack = recv_msg(sock)
         if ack is None:
             raise RuntimeError("Server closed connection before sending ack.")
@@ -209,8 +242,14 @@ def run_federated(args):
         save_csv_row(
             client_log,
             [
-                "time_ms", "client_id", "round_idx", "base_version", "acked_global_version",
-                "pull_ms", "local_train_ms", "push_ms"
+                "time_ms",
+                "client_id",
+                "round_idx",
+                "base_version",
+                "acked_global_version",
+                "pull_ms",
+                "local_train_ms",
+                "push_ms",
             ],
             {
                 "time_ms": now_ms(),
@@ -221,10 +260,18 @@ def run_federated(args):
                 "pull_ms": train_start - t0,
                 "local_train_ms": train_end - train_start,
                 "push_ms": push_end - push_start,
-            }
+            },
         )
 
-        evaluate(model, env, args.client_id, round_idx, eval_log, max_steps=args.eval_steps)
+        evaluate(
+            model=model,
+            env=env,
+            client_id=args.client_id,
+            round_idx=round_idx,
+            out_csv=eval_log,
+            max_steps=args.eval_steps,
+        )
+
         time.sleep(args.sleep_between_rounds)
 
     sock.close()
@@ -232,8 +279,12 @@ def run_federated(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+
+    # federated args
     parser.add_argument("--server_ip", type=str, default="")
     parser.add_argument("--server_port", type=int, default=7000)
+
+    # common args
     parser.add_argument("--client_id", type=int, required=True)
     parser.add_argument("--trace_csv", type=str, required=True)
     parser.add_argument("--rounds", type=int, default=20)
@@ -246,7 +297,7 @@ if __name__ == "__main__":
         "--run_mode",
         type=str,
         default="federated",
-        choices=["baseline", "local_ppo", "federated"]
+        choices=["baseline", "local_ppo", "federated"],
     )
     parser.add_argument("--algo_tag", type=str, default="")
     parser.add_argument("--run_id", type=str, default="")
