@@ -6,6 +6,7 @@ import struct
 import time
 import csv
 import os
+import torch
 
 
 def now_ms():
@@ -47,3 +48,31 @@ def save_csv_row(path, fieldnames, row):
         if not exists:
             writer.writeheader()
         writer.writerow(row)
+
+
+def get_state_dict(model):
+    state = model.policy.state_dict()
+    out = {}
+    for k, v in state.items():
+        if torch.is_tensor(v):
+            out[k] = v.detach().cpu().clone()
+        else:
+            out[k] = v
+    return out
+
+
+def set_state_dict(model, state_dict):
+    current = model.policy.state_dict()
+    loaded = {}
+
+    for k, v in current.items():
+        if k in state_dict:
+            sv = state_dict[k]
+            if torch.is_tensor(v) and torch.is_tensor(sv):
+                loaded[k] = sv.to(v.device).type(v.dtype)
+            else:
+                loaded[k] = sv
+        else:
+            loaded[k] = v
+
+    model.policy.load_state_dict(loaded, strict=False)
